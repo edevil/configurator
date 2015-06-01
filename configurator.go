@@ -156,7 +156,7 @@ func doDownload(c *zk.Conn, serverPrefix *string, localPrefix *string) {
 		if err := ioutil.WriteFile(*localPrefix, fData, 0644); err != nil {
 			panic(err)
 		}
-		fmt.Printf("Downloaded file: %s", *localPrefix)
+		fmt.Printf("Downloaded file: %s\n", *localPrefix)
 	}
 }
 
