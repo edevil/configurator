@@ -60,6 +60,10 @@ func doUpload(c *zk.Conn, serverPrefix *string, localPrefix *string) {
 	ensureRemotePath(c, serverPrefix)
 
 	visitFunc := func(visitedPath string, fInfo os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
 		if !fInfo.Mode().IsRegular() && !fInfo.IsDir() {
 			fmt.Printf("Node is not a regular file: %s\n", visitedPath)
 			return err
