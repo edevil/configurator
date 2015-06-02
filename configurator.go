@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -19,7 +20,7 @@ func doDelete(c *zk.Conn, serverPrefix *string) {
 	children, stat, err := c.Children(*serverPrefix)
 	if err != nil {
 		if err == zk.ErrNoNode {
-			fmt.Printf("Path %s not there\n", *serverPrefix)
+			log.Printf("Path %s not there\n", *serverPrefix)
 			return
 		}
 		panic(err)
@@ -30,7 +31,7 @@ func doDelete(c *zk.Conn, serverPrefix *string) {
 		doDelete(c, &fullpath)
 	}
 
-	fmt.Printf("Will delete %s\n", *serverPrefix)
+	log.Printf("Will delete %s\n", *serverPrefix)
 	c.Delete(*serverPrefix, stat.Version)
 }
 
@@ -43,7 +44,7 @@ func ensureRemotePath(c *zk.Conn, serverPrefix *string) {
 	ensureRemotePath(c, &dir)
 	if _, err := c.Create(*serverPrefix, nil, 0, zk.AuthACL(zk.PermAll)); err != nil {
 		if err == zk.ErrNodeExists {
-			fmt.Printf("Dir already created: %s\n", *serverPrefix)
+			log.Printf("Dir already created: %s\n", *serverPrefix)
 		} else {
 			panic(err)
 		}
@@ -65,7 +66,7 @@ func doUpload(c *zk.Conn, serverPrefix *string, localPrefix *string) {
 		}
 
 		if !fInfo.Mode().IsRegular() && !fInfo.IsDir() {
-			fmt.Printf("Node is not a regular file: %s\n", visitedPath)
+			log.Printf("Node is not a regular file: %s\n", visitedPath)
 			return err
 		}
 
@@ -87,7 +88,7 @@ func doUpload(c *zk.Conn, serverPrefix *string, localPrefix *string) {
 		if _, err := c.Create(remotePath, fData, 0, zk.AuthACL(zk.PermAll)); err != nil {
 			if err == zk.ErrNodeExists {
 				if fInfo.IsDir() {
-					fmt.Printf("Dir already there: %s\n", remotePath)
+					log.Printf("Dir already there: %s\n", remotePath)
 				} else {
 					_, fStat, err := c.Exists(remotePath)
 					if err != nil {
@@ -99,13 +100,13 @@ func doUpload(c *zk.Conn, serverPrefix *string, localPrefix *string) {
 					if _, err := c.Set(remotePath, fData, fStat.Version); err != nil {
 						panic(err)
 					}
-					fmt.Printf("Overwrote %s -> %s\n", visitedPath, remotePath)
+					log.Printf("Overwrote %s -> %s\n", visitedPath, remotePath)
 				}
 			} else {
 				panic(err)
 			}
 		} else {
-			fmt.Printf("Copied %s -> %s\n", visitedPath, remotePath)
+			log.Printf("Copied %s -> %s\n", visitedPath, remotePath)
 		}
 
 		return err
@@ -120,8 +121,7 @@ func doDownload(c *zk.Conn, serverPrefix *string, localPrefix *string) {
 	fData, stat, err := c.Get(*serverPrefix)
 	if err != nil {
 		if err == zk.ErrNoNode {
-			fmt.Printf("Path %s not there\n", *serverPrefix)
-			return
+			log.Fatalf("Path %s not there\n", *serverPrefix)
 		}
 		panic(err)
 	}
@@ -130,12 +130,12 @@ func doDownload(c *zk.Conn, serverPrefix *string, localPrefix *string) {
 		// create dir
 		if err := os.Mkdir(*localPrefix, nodeMode); err != nil {
 			if os.IsExist(err) {
-				fmt.Printf("Local dir already present: %s\n", *localPrefix)
+				log.Printf("Local dir already present: %s\n", *localPrefix)
 			} else {
 				panic(err)
 			}
 		} else {
-			fmt.Printf("Created local dir: %s\n", *localPrefix)
+			log.Printf("Created local dir: %s\n", *localPrefix)
 		}
 
 		// iterate children
@@ -153,9 +153,37 @@ func doDownload(c *zk.Conn, serverPrefix *string, localPrefix *string) {
 
 		}
 	} else {
+		// check local file
+		mtime := time.Unix(stat.Mtime/1000, 0)
+		log.Printf("Remote file was modified on: %s\n", mtime)
+
+		fInfo, err := os.Stat(*localPrefix)
+		if err != nil {
+			if os.IsNotExist(err) {
+				log.Printf("Local file does not exist\n")
+			} else {
+				panic(err)
+			}
+		} else {
+			log.Printf("Local file was modified on: %s\n", fInfo.ModTime())
+			if mtime == fInfo.ModTime() {
+				log.Printf("Files are the same")
+				return
+			} else if mtime.After(fInfo.ModTime()) {
+				log.Printf("Remote file is newer, will overwrite")
+			} else {
+				fmt.Printf("Remote file is older than local file: %s\n", *localPrefix)
+			}
+		}
+
+		// create file
 		if err := ioutil.WriteFile(*localPrefix, fData, 0644); err != nil {
 			panic(err)
 		}
+		if err := os.Chtimes(*localPrefix, mtime, mtime); err != nil {
+			panic(err)
+		}
+
 		fmt.Printf("Downloaded file: %s\n", *localPrefix)
 	}
 }
@@ -174,6 +202,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	defer c.Close()
 
 	if *authPtr != "" {
 		err = c.AddAuth("digest", []byte(*authPtr))
@@ -191,6 +220,5 @@ func main() {
 		doDownload(c, serverPrefix, localPrefix)
 	}
 
-	c.Close()
-	fmt.Println("Connection closed")
+	log.Println("All done")
 }
