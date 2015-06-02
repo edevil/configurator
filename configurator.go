@@ -169,10 +169,11 @@ func doDownload(c *zk.Conn, serverPrefix *string, localPrefix *string) {
 			if mtime == fInfo.ModTime() {
 				log.Printf("Files are the same")
 				return
-			} else if mtime.After(fInfo.ModTime()) {
-				log.Printf("Remote file is newer, will overwrite")
-			} else {
+			} else if mtime.Before(fInfo.ModTime()) {
 				fmt.Printf("Remote file is older than local file: %s\n", *localPrefix)
+				return
+			} else {
+				log.Printf("Remote file is newer, will overwrite")
 			}
 		}
 
